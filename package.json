@@ -5,7 +5,8 @@
   "description": "QuickBite grocery app with Node.js backend and local demo fallback",
   "scripts": {
     "start": "node backend.js",
-    "dev": "node --watch backend.js"
+    "dev": "node backend.js",
+    "php": "php -S 127.0.0.1:3000 -t . php-server.php"
   },
   "dependencies": {
     "@vercel/kv": "^2.0.0"

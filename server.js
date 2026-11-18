@@ -470,14 +470,403 @@ function getSqliteDb() {
 
   sqliteDb = new SqliteDatabaseSync(SQLITE_STORE_PATH);
   sqliteDb.exec(`
+    PRAGMA journal_mode = WAL;
+
     CREATE TABLE IF NOT EXISTS app_state (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       store_json TEXT NOT NULL,
       updated_at INTEGER NOT NULL
-    )
+    );
+
+    CREATE TABLE IF NOT EXISTS app_users (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      address TEXT NOT NULL,
+      favourites_json TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      password_salt TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS user_sessions (
+      token TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS admin_sessions (
+      token TEXT PRIMARY KEY,
+      role TEXT NOT NULL,
+      store_id INTEGER,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS store_managers (
+      store_id INTEGER PRIMARY KEY,
+      password_hash TEXT NOT NULL,
+      password_salt TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS catalog_stores (
+      id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      cuisine TEXT NOT NULL,
+      rating REAL NOT NULL,
+      delivery_time INTEGER NOT NULL,
+      min_order INTEGER NOT NULL,
+      avg_cost INTEGER NOT NULL,
+      category TEXT NOT NULL,
+      promo TEXT NOT NULL,
+      tags_json TEXT NOT NULL,
+      img TEXT NOT NULL,
+      address TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS catalog_products (
+      id INTEGER PRIMARY KEY,
+      store_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      price INTEGER NOT NULL,
+      img TEXT NOT NULL,
+      veg INTEGER NOT NULL,
+      bestseller INTEGER NOT NULL,
+      stock INTEGER NOT NULL,
+      reorder_level INTEGER NOT NULL,
+      category TEXT NOT NULL,
+      unit TEXT NOT NULL,
+      sku TEXT NOT NULL,
+      tags_json TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS orders (
+      order_id TEXT PRIMARY KEY,
+      rest_id INTEGER NOT NULL,
+      rest_name TEXT NOT NULL,
+      rest_img TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      user_email TEXT NOT NULL,
+      customer_name TEXT NOT NULL,
+      customer_phone TEXT NOT NULL,
+      customer_address TEXT NOT NULL,
+      customer_note TEXT NOT NULL,
+      customer_json TEXT NOT NULL,
+      items_json TEXT NOT NULL,
+      subtotal INTEGER NOT NULL,
+      tax INTEGER NOT NULL,
+      delivery INTEGER NOT NULL,
+      total INTEGER NOT NULL,
+      coupon_code TEXT NOT NULL,
+      discount INTEGER NOT NULL,
+      payment TEXT NOT NULL,
+      status TEXT NOT NULL,
+      date_text TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      eta_minutes INTEGER NOT NULL,
+      stock_reverted INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS order_items (
+      order_id TEXT NOT NULL,
+      line_no INTEGER NOT NULL,
+      product_id INTEGER NOT NULL,
+      store_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      price INTEGER NOT NULL,
+      qty INTEGER NOT NULL,
+      sku TEXT NOT NULL,
+      unit TEXT NOT NULL,
+      category TEXT NOT NULL,
+      img TEXT NOT NULL,
+      PRIMARY KEY (order_id, line_no)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_admin_sessions_store_id ON admin_sessions(store_id);
+    CREATE INDEX IF NOT EXISTS idx_catalog_products_store_id ON catalog_products(store_id);
+    CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
+    CREATE INDEX IF NOT EXISTS idx_orders_rest_id ON orders(rest_id);
+    CREATE INDEX IF NOT EXISTS idx_order_items_store_id ON order_items(store_id);
+    CREATE INDEX IF NOT EXISTS idx_order_items_product_id ON order_items(product_id);
   `);
 
   return sqliteDb;
+}
+
+function toSqliteJson(value, fallback = '[]') {
+  try {
+    return JSON.stringify(value ?? JSON.parse(fallback));
+  } catch {
+    return fallback;
+  }
+}
+
+function getStoreSnapshotSignal(storeInput) {
+  const store = migrateStoreShape(storeInput);
+  let freshness = 0;
+
+  const includeTimestamp = value => {
+    const normalized = toWholeNumber(value, 0);
+    if (normalized > freshness) freshness = normalized;
+  };
+
+  (store.users || []).forEach(user => {
+    includeTimestamp(user?.updatedAt);
+    includeTimestamp(user?.createdAt);
+  });
+  (store.orders || []).forEach(order => {
+    includeTimestamp(order?.createdAt);
+  });
+  (store.sessions || []).forEach(session => {
+    includeTimestamp(session?.createdAt);
+    includeTimestamp(session?.expiresAt);
+  });
+  (store.adminSessions || []).forEach(session => {
+    includeTimestamp(session?.createdAt);
+    includeTimestamp(session?.expiresAt);
+  });
+  (store.storeManagers || []).forEach(manager => {
+    includeTimestamp(manager?.updatedAt);
+    includeTimestamp(manager?.createdAt);
+  });
+
+  const storeCount = (store.catalogStores || []).length;
+  const productCount = (store.catalogStores || []).reduce((count, storeEntry) => {
+    return count + (storeEntry.menu || []).length;
+  }, 0);
+  const richness = ((store.users || []).length * 10_000)
+    + ((store.orders || []).length * 10_000)
+    + (storeCount * 1_000)
+    + productCount
+    + (store.sessions || []).length
+    + (store.adminSessions || []).length
+    + (store.storeManagers || []).length;
+
+  return { freshness, richness };
+}
+
+function pickPreferredStoreSnapshot(fileStore, sqliteStore) {
+  if (fileStore && !sqliteStore) return fileStore;
+  if (sqliteStore && !fileStore) return sqliteStore;
+  if (!fileStore && !sqliteStore) return migrateStoreShape(null);
+
+  const fileSignal = getStoreSnapshotSignal(fileStore);
+  const sqliteSignal = getStoreSnapshotSignal(sqliteStore);
+
+  if (fileSignal.freshness !== sqliteSignal.freshness) {
+    return fileSignal.freshness > sqliteSignal.freshness ? fileStore : sqliteStore;
+  }
+  if (fileSignal.richness !== sqliteSignal.richness) {
+    return fileSignal.richness > sqliteSignal.richness ? fileStore : sqliteStore;
+  }
+
+  return sqliteStore;
+}
+
+function syncNormalizedSqliteTables(db, storeInput) {
+  if (!db) return;
+  const store = migrateStoreShape(storeInput);
+
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.exec(`
+      DELETE FROM order_items;
+      DELETE FROM orders;
+      DELETE FROM catalog_products;
+      DELETE FROM catalog_stores;
+      DELETE FROM store_managers;
+      DELETE FROM admin_sessions;
+      DELETE FROM user_sessions;
+      DELETE FROM app_users;
+    `);
+
+    const insertUser = db.prepare(`
+      INSERT INTO app_users (
+        id, name, email, phone, address, favourites_json,
+        password_hash, password_salt, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertUserSession = db.prepare(`
+      INSERT INTO user_sessions (token, user_id, created_at, expires_at)
+      VALUES (?, ?, ?, ?)
+    `);
+    const insertAdminSession = db.prepare(`
+      INSERT INTO admin_sessions (token, role, store_id, created_at, expires_at)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    const insertStoreManager = db.prepare(`
+      INSERT INTO store_managers (store_id, password_hash, password_salt, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    const insertCatalogStore = db.prepare(`
+      INSERT INTO catalog_stores (
+        id, name, cuisine, rating, delivery_time, min_order, avg_cost,
+        category, promo, tags_json, img, address
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertCatalogProduct = db.prepare(`
+      INSERT INTO catalog_products (
+        id, store_id, name, description, price, img, veg, bestseller,
+        stock, reorder_level, category, unit, sku, tags_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertOrder = db.prepare(`
+      INSERT INTO orders (
+        order_id, rest_id, rest_name, rest_img, user_id, user_email,
+        customer_name, customer_phone, customer_address, customer_note,
+        customer_json, items_json, subtotal, tax, delivery, total,
+        coupon_code, discount, payment, status, date_text, created_at,
+        eta_minutes, stock_reverted
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertOrderItem = db.prepare(`
+      INSERT INTO order_items (
+        order_id, line_no, product_id, store_id, name, price, qty, sku, unit, category, img
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    (store.users || []).forEach(user => {
+      insertUser.run(
+        String(user.id || ''),
+        String(user.name || ''),
+        String(user.email || ''),
+        String(user.phone || ''),
+        String(user.address || ''),
+        toSqliteJson(Array.isArray(user.favourites) ? user.favourites : [], '[]'),
+        String(user.passwordHash || ''),
+        String(user.passwordSalt || ''),
+        toWholeNumber(user.createdAt, Date.now()),
+        toWholeNumber(user.updatedAt, Date.now())
+      );
+    });
+
+    (store.sessions || []).forEach(session => {
+      insertUserSession.run(
+        String(session.token || ''),
+        String(session.userId || ''),
+        toWholeNumber(session.createdAt, Date.now()),
+        toWholeNumber(session.expiresAt, Date.now())
+      );
+    });
+
+    (store.adminSessions || []).forEach(session => {
+      const role = session?.role === 'store' ? 'store' : 'super';
+      insertAdminSession.run(
+        String(session.token || ''),
+        role,
+        role === 'store' ? toWholeNumber(session.storeId, 0) : null,
+        toWholeNumber(session.createdAt, Date.now()),
+        toWholeNumber(session.expiresAt, Date.now())
+      );
+    });
+
+    (store.storeManagers || []).forEach(manager => {
+      insertStoreManager.run(
+        toWholeNumber(manager.storeId, 0),
+        String(manager.passwordHash || ''),
+        String(manager.passwordSalt || ''),
+        toWholeNumber(manager.createdAt, Date.now()),
+        toWholeNumber(manager.updatedAt, Date.now())
+      );
+    });
+
+    (store.catalogStores || []).forEach(storeEntry => {
+      insertCatalogStore.run(
+        toWholeNumber(storeEntry.id, 0),
+        String(storeEntry.name || ''),
+        String(storeEntry.cuisine || ''),
+        Number(storeEntry.rating) || 0,
+        toWholeNumber(storeEntry.deliveryTime, 0),
+        toWholeNumber(storeEntry.minOrder, 0),
+        toWholeNumber(storeEntry.avgCost, 0),
+        String(storeEntry.category || ''),
+        String(storeEntry.promo || ''),
+        toSqliteJson(Array.isArray(storeEntry.tags) ? storeEntry.tags : [], '[]'),
+        String(storeEntry.img || ''),
+        String(storeEntry.address || '')
+      );
+
+      (storeEntry.menu || []).forEach(product => {
+        insertCatalogProduct.run(
+          toWholeNumber(product.id, 0),
+          toWholeNumber(storeEntry.id, 0),
+          String(product.name || ''),
+          String(product.desc || ''),
+          toWholeNumber(product.price, 0),
+          String(product.img || ''),
+          product.veg ? 1 : 0,
+          product.bestseller ? 1 : 0,
+          toWholeNumber(product.stock, 0),
+          toWholeNumber(product.reorderLevel, 0),
+          String(product.category || ''),
+          String(product.unit || ''),
+          String(product.sku || ''),
+          toSqliteJson(Array.isArray(product.tags) ? product.tags : [], '[]')
+        );
+      });
+    });
+
+    (store.orders || []).forEach(order => {
+      const customer = order.customer && typeof order.customer === 'object' ? order.customer : {};
+      const items = Array.isArray(order.items) ? order.items : [];
+      insertOrder.run(
+        String(order.orderId || ''),
+        toWholeNumber(order.restId, 0),
+        String(order.restName || ''),
+        String(order.restImg || ''),
+        String(order.userId || ''),
+        String(order.userEmail || ''),
+        String(customer.name || ''),
+        String(customer.phone || ''),
+        String(customer.address || ''),
+        String(customer.note || ''),
+        toSqliteJson(customer, '{}'),
+        toSqliteJson(items, '[]'),
+        toWholeNumber(order.subtotal, 0),
+        toWholeNumber(order.tax, 0),
+        toWholeNumber(order.delivery, 0),
+        toWholeNumber(order.total, 0),
+        String(order.couponCode || ''),
+        toWholeNumber(order.discount, 0),
+        String(order.payment || ''),
+        String(order.status || ''),
+        String(order.date || ''),
+        toWholeNumber(order.createdAt, 0),
+        toWholeNumber(order.etaMinutes, 0),
+        order.stockReverted ? 1 : 0
+      );
+
+      items.forEach((item, index) => {
+        insertOrderItem.run(
+          String(order.orderId || ''),
+          index + 1,
+          toWholeNumber(item.id, 0),
+          toWholeNumber(item.restId || order.restId, 0),
+          String(item.name || ''),
+          toWholeNumber(item.price, 0),
+          toWholeNumber(item.qty, 0),
+          String(item.sku || ''),
+          String(item.unit || ''),
+          String(item.category || ''),
+          String(item.img || '')
+        );
+      });
+    });
+
+    db.exec('COMMIT');
+  } catch (error) {
+    try {
+      db.exec('ROLLBACK');
+    } catch {}
+    throw error;
+  }
 }
 
 function readStoreFromSqlite() {
@@ -499,7 +888,8 @@ function writeStoreToSqlite(store) {
   const db = getSqliteDb();
   if (!db) return;
 
-  const payload = JSON.stringify(migrateStoreShape(store));
+  const normalizedStore = migrateStoreShape(store);
+  const payload = JSON.stringify(normalizedStore);
   db.prepare(`
     INSERT INTO app_state (id, store_json, updated_at)
     VALUES (1, ?, ?)
@@ -507,6 +897,7 @@ function writeStoreToSqlite(store) {
       store_json = excluded.store_json,
       updated_at = excluded.updated_at
   `).run(payload, Date.now());
+  syncNormalizedSqliteTables(db, normalizedStore);
 }
 
 async function writeStoreMirrorFile(store) {
@@ -548,7 +939,7 @@ async function ensureStoreFile() {
 
   if (isSqliteStorageActive()) {
     await fs.mkdir(DATA_DIR, { recursive: true });
-    getSqliteDb();
+    const db = getSqliteDb();
 
     let fileStore = null;
     try {
@@ -561,10 +952,13 @@ async function ensureStoreFile() {
     }
 
     const sqliteStore = readStoreFromSqlite();
-    const baseline = sqliteStore || migrateStoreShape(fileStore);
+    const normalizedFileStore = fileStore ? migrateStoreShape(fileStore) : null;
+    const baseline = pickPreferredStoreSnapshot(normalizedFileStore, sqliteStore);
 
-    if (!sqliteStore) {
+    if (!sqliteStore || baseline !== sqliteStore) {
       writeStoreToSqlite(baseline);
+    } else {
+      syncNormalizedSqliteTables(db, baseline);
     }
 
     await writeStoreMirrorFile(baseline);

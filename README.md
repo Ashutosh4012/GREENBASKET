@@ -2,7 +2,7 @@
 ### Full Stack Web Project
 
 ## Overview
-QuickBite Grocery is a full online grocery ordering and management system built with HTML, CSS, vanilla JavaScript, and a Node.js backend.
+QuickBite Grocery is a full online grocery ordering and management system built with HTML, CSS, vanilla JavaScript, and a PHP backend.
 
 The UI keeps the original QuickBite design style, while the product logic is now grocery-first:
 - Multi-store grocery catalog
@@ -13,19 +13,12 @@ The UI keeps the original QuickBite design style, while the product logic is now
 
 ## Tech Stack
 - Frontend: HTML5, CSS3, Vanilla JavaScript
-- Backend: Node.js HTTP server (`server.js`)
-- Storage:
-  - Local default: SQLite (`data/store.db`) with automatic JSON mirror (`data/store.json`)
-  - Vercel: Vercel KV (`@vercel/kv`) recommended for persistence
+- Backend: PHP built-in server (`php-server.php`)
+- Storage: JSON file (`data/store.json`) for local persistence
 
-### Storage Modes
-- `Vercel KV` (if `KV_REST_API_URL` and `KV_REST_API_TOKEN` are set) is used as primary storage.
-- Otherwise, local runtime uses `SQLite` as primary storage and keeps `data/store.json` synced as a readable backup/export.
-- If SQLite is disabled or unavailable, backend falls back to JSON file storage.
-
-Useful env vars:
-- `QB_ENABLE_SQLITE=0` to force-disable SQLite and use JSON file only.
-- `QB_SQLITE_PATH=/custom/path/quickbite.db` to change SQLite file path.
+### Storage
+- The PHP backend uses the existing JSON store in `data/store.json` for users, orders, catalog data, and sessions.
+- No SQL backend is used in this version.
 
 ## Main Features
 
@@ -47,9 +40,13 @@ Useful env vars:
 
 ## Run Locally
 1. Open the project folder in terminal
-2. Run:
+2. Run either:
    ```bash
    npm start
+   ```
+   or for the PHP backend:
+   ```bash
+   npm run php
    ```
 3. Open:
    - `http://127.0.0.1:3000`
@@ -57,7 +54,7 @@ Useful env vars:
 If backend is unreachable, the app now auto-switches to a local demo backend mode in-browser, so ordering and admin inventory management still work with demo grocery data.
 
 Backend entry file in project root:
-- `backend.js` (loads `server.js`)
+- `backend.js` (starts the PHP backend)
 
 ## Deploy To Vercel
 This project is now Vercel-ready with:
