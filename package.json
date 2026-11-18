@@ -2,15 +2,9 @@
   "name": "quickbite-real-backend",
   "version": "1.0.0",
   "private": true,
-  "description": "QuickBite grocery app with Node.js backend and local demo fallback",
+  "description": "QuickBite grocery app with PHP backend and local demo fallback",
   "scripts": {
-    "start": "node backend.js",
-    "dev": "node --watch backend.js"
-  },
-  "engines": {
-    "node": ">=22.5.0"
-  },
-  "dependencies": {
-    "@upstash/redis": "^1.41.0"
+    "start": "php -S 127.0.0.1:3000 -t . php-router.php",
+    "dev": "php -S 127.0.0.1:3000 -t . php-router.php"
   }
 }

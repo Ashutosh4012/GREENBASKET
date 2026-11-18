@@ -2,7 +2,7 @@
 ### Full Stack Web Project
 
 ## Overview
-QuickBite Grocery is a full online grocery ordering and management system built with HTML, CSS, vanilla JavaScript, and a Node.js backend.
+QuickBite Grocery is an online grocery ordering and management system built with HTML, CSS, vanilla JavaScript, and a PHP backend.
 
 The UI keeps the original QuickBite design style, while the product logic is now grocery-first:
 - Multi-store grocery catalog
@@ -13,14 +13,15 @@ The UI keeps the original QuickBite design style, while the product logic is now
 
 ## Tech Stack
 - Frontend: HTML5, CSS3, Vanilla JavaScript
-- Backend: Node.js HTTP server (`server.js`)
-- Storage: SQLite database (`data/store.db`), with a JSON mirror at `data/store.json`
+- Backend: PHP API (`api.php`) with a PHP built-in server router (`php-router.php`)
+- Storage: JSON file (`data/store.json`)
 
 ### Storage
-- User accounts, sessions, orders, inventory, and catalog changes are stored in SQLite.
-- `data/store.json` is maintained as a readable mirror and migration source; it is not the primary database.
+- User accounts, sessions, orders, inventory, and catalog changes are stored in `data/store.json`.
+- The API locks the JSON file while updating it.
 - Signup and checkout require the live backend. The browser demo fallback will not report success for those writes.
-- Local SQLite storage uses Node.js 22.5 or newer. Vercel deployments must connect an Upstash Redis database for persistent storage.
+- PHP 8.1 or newer is recommended. The PHP process needs write access to `data/store.json`.
+- Accounts from the previous Node.js backend use scrypt hashes that this PHP backend cannot verify, so existing users need to register again. Default store manager passwords continue to work.
 
 ## Main Features
 
@@ -44,31 +45,28 @@ The UI keeps the original QuickBite design style, while the product logic is now
 1. Open the project folder in terminal
 2. Run:
    ```bash
-   npm start
+   php -S 127.0.0.1:3000 -t . php-router.php
    ```
 3. Open:
    - `http://127.0.0.1:3000`
 
 If the backend is unreachable, the app can use local demo data for browsing. Account creation and checkout require the live backend so they are saved in persistent storage.
 
-Backend entry file in project root:
-- `backend.js` (starts the SQLite-backed Node.js server)
+Backend entry files in project root:
+- `api.php` (PHP API)
+- `php-router.php` (serves the frontend and routes `/api/*` requests)
 
-## Deploy To Vercel
-This project is now Vercel-ready with:
-- `api/index.js` as the serverless API entry
-- `api/[...route].js` catch-all route for `/api/*`
+## Deployment
+Deploy to a PHP host with PHP 8.1+ and URL rewriting enabled. Route `/api/*` to `api.php`. The old JavaScript handlers in `api/` are retained as legacy files and are not used by the PHP backend.
 
 ### Steps
 1. Push this folder to GitHub.
-2. Import the repo in Vercel.
+2. Deploy to a PHP hosting provider.
 3. Set Environment Variables:
-   - `QB_ADMIN_PASSWORD` (required, strong secret)
-   - `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` (provided by the Upstash Redis integration)
-4. Redeploy after connecting Redis. Without persistent storage, the API health check fails and signup/order writes are refused.
+   - `QB_ADMIN_PASSWORD` (strong secret)
+4. Ensure PHP can write to `data/store.json`.
 
 ### Important Notes
-- Without Upstash Redis credentials, the Vercel API health check returns an error and signup/order writes are disabled.
 - Frontend and API use same-origin routes on deployed environments (`/api/...`).
 
 ### Admin Password
@@ -92,15 +90,12 @@ This project is now Vercel-ready with:
 ## Project Structure
 ```text
 QuickBite/
-├── api/
-│   ├── index.js
-│   └── [...route].js
+├── api.php
+├── php-router.php
 ├── index.html
 ├── style.css
 ├── app.js
-├── server.js
 ├── data/
-│   ├── store.db
 │   └── store.json
 ├── package.json
 └── README.md
