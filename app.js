@@ -815,6 +815,15 @@ async function localApiRequest(endpoint, options = {}) {
   const { method = 'GET', body = {}, token = '' } = options;
   const url = new URL(endpoint, 'http://local.quickbite');
   const pathname = url.pathname;
+
+  // Signup and checkout must be committed by the live backend database. Do not
+  // report success for these writes when the app is running in browser demo mode.
+  if ((method === 'POST' && (pathname === '/api/auth/signup' || pathname === '/api/orders'))) {
+    const error = new Error('A live database connection is required to create an account or place an order. Please start the backend and try again.');
+    error.status = 503;
+    throw error;
+  }
+
   const state = readLocalDemoStore();
   pruneLocalSessions(state);
 
@@ -1479,7 +1488,15 @@ async function apiRequest(endpoint, options = {}) {
   const hasStickyLocalUserSession = Boolean(userToken) && hasLocalDemoSessionToken(userToken, { admin: false });
   const hasStickyLocalAdminSession = Boolean(adminToken) && hasLocalDemoSessionToken(adminToken, { admin: true });
   const hasStickyLocalSession = hasStickyLocalUserSession || hasStickyLocalAdminSession;
-  const useLocalDemoForPublicApi = !requiresSessionToken && endpoint.startsWith('/api/') && hasStickyLocalSession;
+  if (method === 'POST' && endpoint === '/api/orders' && hasStickyLocalUserSession) {
+    const error = new Error('This account was created in browser demo mode. Sign out and create or sign in to your account while the backend is running before placing a database order.');
+    error.status = 409;
+    throw error;
+  }
+  const useLocalDemoForPublicApi = !requiresSessionToken
+    && endpoint.startsWith('/api/')
+    && hasStickyLocalSession
+    && endpoint !== '/api/auth/signup';
   const useLocalDemoForSession = requiresSessionToken && hasLocalDemoSessionToken(token, { admin });
   if (token) headers.Authorization = `Bearer ${token}`;
 

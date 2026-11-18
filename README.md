@@ -2,7 +2,7 @@
 ### Full Stack Web Project
 
 ## Overview
-QuickBite Grocery is a full online grocery ordering and management system built with HTML, CSS, vanilla JavaScript, and a PHP backend.
+QuickBite Grocery is a full online grocery ordering and management system built with HTML, CSS, vanilla JavaScript, and a Node.js backend.
 
 The UI keeps the original QuickBite design style, while the product logic is now grocery-first:
 - Multi-store grocery catalog
@@ -13,12 +13,14 @@ The UI keeps the original QuickBite design style, while the product logic is now
 
 ## Tech Stack
 - Frontend: HTML5, CSS3, Vanilla JavaScript
-- Backend: PHP built-in server (`php-server.php`)
-- Storage: JSON file (`data/store.json`) for local persistence
+- Backend: Node.js HTTP server (`server.js`)
+- Storage: SQLite database (`data/store.db`), with a JSON mirror at `data/store.json`
 
 ### Storage
-- The PHP backend uses the existing JSON store in `data/store.json` for users, orders, catalog data, and sessions.
-- No SQL backend is used in this version.
+- User accounts, sessions, orders, inventory, and catalog changes are stored in SQLite.
+- `data/store.json` is maintained as a readable mirror and migration source; it is not the primary database.
+- Signup and checkout require the live backend. The browser demo fallback will not report success for those writes.
+- Local SQLite storage uses Node.js 22.5 or newer. Deployments must configure persistent Vercel KV storage.
 
 ## Main Features
 
@@ -40,21 +42,17 @@ The UI keeps the original QuickBite design style, while the product logic is now
 
 ## Run Locally
 1. Open the project folder in terminal
-2. Run either:
+2. Run:
    ```bash
    npm start
-   ```
-   or for the PHP backend:
-   ```bash
-   npm run php
    ```
 3. Open:
    - `http://127.0.0.1:3000`
 
-If backend is unreachable, the app now auto-switches to a local demo backend mode in-browser, so ordering and admin inventory management still work with demo grocery data.
+If the backend is unreachable, the app can use local demo data for browsing. Account creation and checkout require the live backend so they are saved in persistent storage.
 
 Backend entry file in project root:
-- `backend.js` (starts the PHP backend)
+- `backend.js` (starts the SQLite-backed Node.js server)
 
 ## Deploy To Vercel
 This project is now Vercel-ready with:

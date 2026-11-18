@@ -2851,6 +2851,9 @@ function createServer() {
 }
 
 async function startServer() {
+  if (!kvClient && !IS_VERCEL_RUNTIME && !isSqliteStorageActive()) {
+    throw new Error('SQLite storage is unavailable. Use Node.js 22.5 or newer and keep QB_ENABLE_SQLITE enabled.');
+  }
   await ensureStoreInitialized();
   const server = createServer();
 
