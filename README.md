@@ -20,7 +20,7 @@ The UI keeps the original QuickBite design style, while the product logic is now
 - User accounts, sessions, orders, inventory, and catalog changes are stored in SQLite.
 - `data/store.json` is maintained as a readable mirror and migration source; it is not the primary database.
 - Signup and checkout require the live backend. The browser demo fallback will not report success for those writes.
-- Local SQLite storage uses Node.js 22.5 or newer. Deployments must configure persistent Vercel KV storage.
+- Local SQLite storage uses Node.js 22.5 or newer. Vercel deployments must connect an Upstash Redis database for persistent storage.
 
 ## Main Features
 
@@ -64,11 +64,11 @@ This project is now Vercel-ready with:
 2. Import the repo in Vercel.
 3. Set Environment Variables:
    - `QB_ADMIN_PASSWORD` (required, strong secret)
-   - `KV_REST_API_URL` and `KV_REST_API_TOKEN` (recommended for persistent data)
-4. Deploy.
+   - `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` (provided by the Upstash Redis integration)
+4. Redeploy after connecting Redis. Without persistent storage, the API health check fails and signup/order writes are refused.
 
 ### Important Notes
-- Without Vercel KV, the app falls back to volatile in-memory storage on Vercel Functions (non-persistent across cold starts).
+- Without Upstash Redis credentials, the Vercel API health check returns an error and signup/order writes are disabled.
 - Frontend and API use same-origin routes on deployed environments (`/api/...`).
 
 ### Admin Password

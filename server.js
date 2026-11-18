@@ -26,11 +26,14 @@ const SQLITE_STORAGE_ENABLED = process.env.QB_ENABLE_SQLITE !== '0';
 
 let kvClient = null;
 try {
-  if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
-    kvClient = require('@vercel/kv').kv;
+  const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+  if (redisUrl && redisToken) {
+    const { Redis } = require('@upstash/redis');
+    kvClient = new Redis({ url: redisUrl, token: redisToken });
   }
 } catch (error) {
-  console.warn('Vercel KV is not available; using file or volatile store fallback.');
+  console.warn('Upstash Redis is unavailable; persistent Vercel storage is disabled.');
 }
 
 let SqliteDatabaseSync = null;
@@ -42,7 +45,6 @@ if (SQLITE_STORAGE_ENABLED && !kvClient && !IS_VERCEL_RUNTIME) {
   }
 }
 
-let volatileStore = null;
 let sqliteDb = null;
 
 const couponCatalog = {
@@ -905,15 +907,10 @@ async function writeStoreMirrorFile(store) {
   await fs.writeFile(STORE_PATH, JSON.stringify(migrateStoreShape(store), null, 2));
 }
 
-async function ensureVolatileStore() {
-  if (volatileStore) return;
-
-  try {
-    const seeded = JSON.parse(await fs.readFile(STORE_PATH, 'utf8'));
-    volatileStore = migrateStoreShape(seeded);
-  } catch {
-    volatileStore = migrateStoreShape(null);
-  }
+function createStorageUnavailableError() {
+  const error = new Error('Persistent storage is not configured. Connect an Upstash Redis database to this deployment.');
+  error.statusCode = 503;
+  return error;
 }
 
 async function readStoreFromKV() {
@@ -966,7 +963,6 @@ async function ensureStoreFile() {
   }
 
   if (IS_VERCEL_RUNTIME) {
-    await ensureVolatileStore();
     return;
   }
 
@@ -1012,8 +1008,7 @@ async function readStore() {
   }
 
   if (IS_VERCEL_RUNTIME) {
-    await ensureVolatileStore();
-    return migrateStoreShape(volatileStore);
+    throw createStorageUnavailableError();
   }
 
   const raw = await fs.readFile(STORE_PATH, 'utf8');
@@ -1035,8 +1030,7 @@ async function writeStore(store) {
   }
 
   if (IS_VERCEL_RUNTIME) {
-    volatileStore = nextStore;
-    return;
+    throw createStorageUnavailableError();
   }
 
   await fs.writeFile(STORE_PATH, JSON.stringify(nextStore, null, 2));
@@ -2705,7 +2699,11 @@ async function handleApiRequest(req, res, url) {
   const { pathname } = url;
 
   if (req.method === 'GET' && pathname === '/api/health') {
-    return sendJson(res, 200, { ok: true });
+    if (IS_VERCEL_RUNTIME && !kvClient) {
+      return sendError(res, 503, 'Persistent storage is not configured. Connect an Upstash Redis database to this deployment.');
+    }
+    const storage = kvClient ? 'upstash' : isSqliteStorageActive() ? 'sqlite' : 'json';
+    return sendJson(res, 200, { ok: true, storage });
   }
   if (req.method === 'GET' && pathname === '/api/restaurants') {
     return handleGetLiveRestaurants(req, res, url);

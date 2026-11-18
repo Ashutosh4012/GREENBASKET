@@ -11,6 +11,6 @@
     "node": ">=22.5.0"
   },
   "dependencies": {
-    "@vercel/kv": "^2.0.0"
+    "@upstash/redis": "^1.41.0"
   }
 }
