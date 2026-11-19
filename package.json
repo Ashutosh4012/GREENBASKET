@@ -1,8 +1,9 @@
 {
-  "name": "quickbite-real-backend",
+  "name": "greenbasket-grocery",
   "version": "1.0.0",
   "private": true,
-  "description": "QuickBite grocery app with PHP backend and local demo fallback",
+  "description": "GREENBASKET grocery app with PHP backend and local demo fallback",
+  "author": "Ashutosh Panda",
   "scripts": {
     "start": "php -S 127.0.0.1:3000 -t . php-router.php",
     "dev": "php -S 127.0.0.1:3000 -t . php-router.php"

@@ -1,102 +1,90 @@
-# QuickBite Grocery — Full Online Grocery Management System
-### Full Stack Web Project
+# GREENBASKET Grocery — Full Online Grocery Management System
+### Full Stack Web Project · Developed by Ashutosh Panda
 
 ## Overview
-QuickBite Grocery is an online grocery ordering and management system built with HTML, CSS, vanilla JavaScript, and a PHP backend.
+**GREENBASKET** is an online grocery ordering and management system built with HTML, CSS, vanilla JavaScript, and a PHP backend (with Node.js compatibility).
 
-The UI keeps the original QuickBite design style, while the product logic is now grocery-first:
-- Multi-store grocery catalog
-- Product inventory with stock levels
-- Real user auth + persistent sessions
-- Cart, coupons, checkout, order tracking, reorder
-- Admin dashboard for both order operations and inventory management
+The UI provides a grocery-first delivery experience:
+- Multi-store grocery catalog with live store discovery
+- Real-time product inventory tracking with stock levels
+- User authentication and persistent user sessions
+- Cart management, discount coupons, checkout, and live order tracking
+- Admin dashboard for order fulfillment and stock/inventory management
+- Store manager portal for individual store operations
 
 ## Tech Stack
-- Frontend: HTML5, CSS3, Vanilla JavaScript
-- Backend: PHP API (`api.php`) with a PHP built-in server router (`php-router.php`)
-- Storage: JSON file (`data/store.json`)
+- **Frontend:** HTML5, CSS3, Vanilla JavaScript (Single Page Application architecture)
+- **Backend:** PHP API (`api.php`) with built-in server router (`php-router.php`)
+- **Storage:** JSON database (`data/store.json`) with atomic locking and persistent records
 
-### Storage
-- User accounts, sessions, orders, inventory, and catalog changes are stored in `data/store.json`.
-- The API locks the JSON file while updating it.
-- Signup and checkout require the live backend. The browser demo fallback will not report success for those writes.
-- PHP 8.1 or newer is recommended. The PHP process needs write access to `data/store.json`.
-- Accounts from the previous Node.js backend use scrypt hashes that this PHP backend cannot verify, so existing users need to register again. Default store manager passwords continue to work.
+### Database & Storage
+- User profiles, authentication sessions, orders, catalog stores, inventory, and manager credentials are stored in `data/store.json`.
+- The database is owned and configured for **Ashutosh Panda**.
+- The API applies file locks while updating to guarantee transactional safety.
+- Default user account:
+  - **Name:** Ashutosh Panda
+  - **Email:** `ashutoshpanda@gmail.com`
+  - **Password:** `Ashutosh@2026`
 
 ## Main Features
 
 ### Customer Side
-- Grocery store discovery by location
-- Category filters and fast search
-- Product-level stock visibility
-- Stock-safe cart and checkout
+- Grocery store discovery by location (Chandigarh, Mohali, Panchkula, etc.)
+- Category filters (Vegetables, Fruits, Dairy, Bakery, Beverages, Snacks)
+- Fast live search across stores and items
+- Product-level stock indicators (In Stock, Low Stock, Out of Stock)
 - Coupon system (`FIRST50`, `SAVE20`, `FREEDEL`)
-- Order history, live progress, reorder
+- Real-time order progress tracking and reorder capabilities
 
 ### Admin Side
-- Password-protected admin login
-- Order status operations (Pending, Confirmed, Delivered, Cancelled)
-- Live inventory metrics (total products, low stock, out of stock, value)
-- Low-stock alerts
-- Quick stock adjust actions (+/-)
-- Add new products from dashboard
+- Password-protected Admin login
+- Order lifecycle management (Pending, Confirmed, Delivered, Cancelled)
+- Live inventory metrics (total products, low stock, out of stock, total inventory valuation)
+- Instant stock increment/decrement controls
+- Add new stores and create custom or bulk product listings
 
 ## Run Locally
-1. Open the project folder in terminal
-2. Run:
+
+1. Open the project directory in your terminal:
+   ```bash
+   cd Quick-Bite-Grocery
+   ```
+2. Start the local server:
    ```bash
    php -S 127.0.0.1:3000 -t . php-router.php
    ```
-3. Open:
+   *Or with npm:*
+   ```bash
+   npm start
+   ```
+3. Open in your browser:
    - `http://127.0.0.1:3000`
 
-If the backend is unreachable, the app can use local demo data for browsing. Account creation and checkout require the live backend so they are saved in persistent storage.
-
-Backend entry files in project root:
-- `api.php` (PHP API)
-- `php-router.php` (serves the frontend and routes `/api/*` requests)
-
-## Deployment
-Deploy to a PHP host with PHP 8.1+ and URL rewriting enabled. Route `/api/*` to `api.php`. The old JavaScript handlers in `api/` are retained as legacy files and are not used by the PHP backend.
-
-### Steps
-1. Push this folder to GitHub.
-2. Deploy to a PHP hosting provider.
-3. Set Environment Variables:
-   - `QB_ADMIN_PASSWORD` (strong secret)
-4. Ensure PHP can write to `data/store.json`.
-
-### Important Notes
-- Frontend and API use same-origin routes on deployed environments (`/api/...`).
-
-### Admin Password
-- `QuickBite@2026`
+### Admin Credentials
+- **Super Admin Password:** `GREENBASKET@2026`
 
 ### Store Manager Passwords
-- Each store can now log in separately as a **Store Manager**.
-- Default pattern: `Store<StoreId>@QB`
-- Example: for store ID `301`, password is `Store301@QB`
-- Store managers can only:
-  - View orders for their own store
-  - Manage inventory for their own store
-  - Add products to their own store
+- Each store manager can log in independently using:
+  - Pattern: `Store<StoreId>@GB`
+  - Example: for store ID `301`, password is `Store301@GB`
 
-### Super Admin Center
-- Super admin can monitor all store activity in one dashboard.
-- Super admin can add products to:
-  - A selected store, or
-  - **All stores at once** from the Add Grocery tab.
+## Deployment
+Deploy to any PHP host with PHP 8.1+ and URL rewriting enabled. Route `/api/*` to `api.php`.
+- Environment Variable: `GB_ADMIN_PASSWORD` (or `QB_ADMIN_PASSWORD`)
+- Ensure write permissions are granted for `data/store.json`.
 
 ## Project Structure
 ```text
-QuickBite/
-├── api.php
-├── php-router.php
-├── index.html
-├── style.css
-├── app.js
+GREENBASKET/
+├── api.php             # Main PHP REST API endpoint
+├── php-router.php      # Local PHP router serving frontend & API
+├── index.html          # Single Page Application frontend
+├── style.css           # Styling and responsive design
+├── app.js              # Frontend logic, state, and API integration
+├── server.js           # Optional Node.js runtime backend
+├── backend.js          # Node.js backend launcher
 ├── data/
-│   └── store.json
-├── package.json
-└── README.md
+│   └── store.json      # JSON Database (users, orders, inventory)
+├── package.json        # NPM scripts and project metadata
+└── README.md           # Project documentation
 ```
