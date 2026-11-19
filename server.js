@@ -24,32 +24,116 @@ const KV_STORE_KEY = 'greenbasket:store:v1';
 const IS_VERCEL_RUNTIME = Boolean(process.env.VERCEL);
 const SQLITE_STORAGE_ENABLED = process.env.GB_ENABLE_SQLITE !== '0' && process.env.QB_ENABLE_SQLITE !== '0';
 
+function sanitizeEnvValue(val) {
+  if (!val || typeof val !== 'string') return '';
+  return val.trim().replace(/^['"]|['"]$/g, '');
+}
+
 let kvClient = null;
-try {
-  const redisUrl = process.env.UPSTASH_REDIS_REST_URL
+let redisInitPromise = null;
+const redisDiagnostics = {
+  urlDetected: false,
+  tokenDetected: false,
+  configured: false,
+  clientCreated: false,
+  pingOk: false,
+  rwOk: false,
+  error: null,
+  testedAt: null,
+};
+
+async function initRedisClient() {
+  const rawUrl = process.env.UPSTASH_REDIS_REST_URL
     || process.env.KV_REST_API_URL
     || process.env.REDIS_URL
     || process.env.UPSTASH_URL;
-  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN
+  const rawToken = process.env.UPSTASH_REDIS_REST_TOKEN
     || process.env.KV_REST_API_TOKEN
     || process.env.REDIS_TOKEN
     || process.env.UPSTASH_TOKEN;
-  if (redisUrl && redisToken) {
-    const { Redis } = require('@upstash/redis');
-    kvClient = new Redis({ url: redisUrl, token: redisToken });
-    console.log('Upstash Redis storage initialized successfully.');
+
+  const url = sanitizeEnvValue(rawUrl);
+  const token = sanitizeEnvValue(rawToken);
+
+  // Boolean-only detection checks (NEVER log or expose secret values)
+  redisDiagnostics.urlDetected = Boolean(url && url.length > 0);
+  redisDiagnostics.tokenDetected = Boolean(token && token.length > 0);
+  redisDiagnostics.configured = redisDiagnostics.urlDetected && redisDiagnostics.tokenDetected;
+  redisDiagnostics.testedAt = Date.now();
+
+  if (!redisDiagnostics.configured) {
+    redisDiagnostics.error = `Missing credentials: URL=${redisDiagnostics.urlDetected}, Token=${redisDiagnostics.tokenDetected}`;
+    return null;
   }
-} catch (error) {
-  console.warn('Upstash Redis client failed to initialize:', error.message);
+
+  let RedisClass;
+  try {
+    ({ Redis: RedisClass } = require('@upstash/redis'));
+  } catch (importErr) {
+    redisDiagnostics.error = `@upstash/redis package missing: ${importErr.message}`;
+    console.error(redisDiagnostics.error);
+    return null;
+  }
+
+  try {
+    const client = new RedisClass({ url, token });
+    redisDiagnostics.clientCreated = true;
+
+    // 1. Verify connectivity with PING
+    const pingResponse = await client.ping();
+    const pingSuccess = pingResponse === 'PONG' || String(pingResponse).toLowerCase().includes('pong');
+    redisDiagnostics.pingOk = pingSuccess;
+
+    // 2. Test SET and GET using a temporary diagnostic key, then delete it
+    const testKey = `greenbasket:diag:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+    await client.set(testKey, 'greenbasket_test_ok', { ex: 60 });
+    const fetchedVal = await client.get(testKey);
+    await client.del(testKey).catch(() => {});
+
+    redisDiagnostics.rwOk = fetchedVal === 'greenbasket_test_ok';
+
+    if (redisDiagnostics.pingOk && redisDiagnostics.rwOk) {
+      console.log('✅ Upstash Redis verified: PING OK, SET/GET test passed.');
+      redisDiagnostics.error = null;
+      kvClient = client;
+      return client;
+    } else {
+      const diagErr = `Redis diagnostic test: ping=${pingSuccess}, rw=${redisDiagnostics.rwOk}`;
+      console.warn(diagErr);
+      redisDiagnostics.error = diagErr;
+      kvClient = client; // client is functional
+      return client;
+    }
+  } catch (err) {
+    // Redact token from error message if it appears
+    const rawMsg = err && err.message ? err.message : String(err);
+    const safeError = token ? rawMsg.replaceAll(token, '[REDACTED_TOKEN]') : rawMsg;
+    console.error('Upstash Redis connection failed:', safeError);
+    redisDiagnostics.error = safeError;
+    redisDiagnostics.pingOk = false;
+    redisDiagnostics.rwOk = false;
+    kvClient = null;
+    return null;
+  }
+}
+
+function getRedisClient() {
+  if (!redisInitPromise) {
+    redisInitPromise = initRedisClient();
+  }
+  return redisInitPromise;
 }
 
 let SqliteDatabaseSync = null;
-if (SQLITE_STORAGE_ENABLED && !kvClient && !IS_VERCEL_RUNTIME) {
-  try {
-    ({ DatabaseSync: SqliteDatabaseSync } = require('node:sqlite'));
-  } catch {
-    console.warn('node:sqlite is not available; using JSON store fallback.');
+function getSqliteModule() {
+  if (!SqliteDatabaseSync && SQLITE_STORAGE_ENABLED && !kvClient && !IS_VERCEL_RUNTIME) {
+    try {
+      ({ DatabaseSync: SqliteDatabaseSync } = require('node:sqlite'));
+    } catch {
+      console.warn('node:sqlite is not available; using JSON store fallback.');
+    }
   }
+  return SqliteDatabaseSync;
 }
 
 let sqliteDb = null;
@@ -470,14 +554,16 @@ function migrateStoreShape(existing) {
 }
 
 function isSqliteStorageActive() {
-  return Boolean(SqliteDatabaseSync) && !kvClient && !IS_VERCEL_RUNTIME;
+  const mod = getSqliteModule();
+  return Boolean(mod) && !kvClient && !IS_VERCEL_RUNTIME;
 }
 
 function getSqliteDb() {
   if (!isSqliteStorageActive()) return null;
   if (sqliteDb) return sqliteDb;
 
-  sqliteDb = new SqliteDatabaseSync(SQLITE_STORE_PATH);
+  const DatabaseSyncClass = getSqliteModule();
+  sqliteDb = new DatabaseSyncClass(SQLITE_STORE_PATH);
   sqliteDb.exec(`
     PRAGMA journal_mode = WAL;
 
@@ -914,12 +1000,6 @@ async function writeStoreMirrorFile(store) {
   await fs.writeFile(STORE_PATH, JSON.stringify(migrateStoreShape(store), null, 2));
 }
 
-function createStorageUnavailableError() {
-  const error = new Error('Persistent storage is not configured. Connect an Upstash Redis database to this deployment.');
-  error.statusCode = 503;
-  return error;
-}
-
 async function getSeedStoreSnapshot() {
   try {
     const raw = await fs.readFile(STORE_PATH, 'utf8');
@@ -955,11 +1035,15 @@ async function writeStoreToKV(store) {
   try {
     await kvClient.set(KV_STORE_KEY, store);
   } catch (err) {
-    console.error('Failed to write store to Upstash Redis:', err.message);
+    const safeError = err.message || 'Write failed';
+    console.error('Failed to write store to Upstash Redis:', safeError);
+    throw new Error(`Database write error: ${safeError}`);
   }
 }
 
 async function ensureStoreFile() {
+  await getRedisClient();
+
   if (kvClient) {
     const stored = await readStoreFromKV();
     if (!stored) {
@@ -1023,6 +1107,8 @@ async function ensureStoreFile() {
 }
 
 async function readStore() {
+  await getRedisClient();
+
   if (kvClient) {
     const stored = await readStoreFromKV();
     if (stored) return stored;
@@ -1063,6 +1149,7 @@ async function readStore() {
 }
 
 async function writeStore(store) {
+  await getRedisClient();
   const nextStore = migrateStoreShape(store);
 
   if (kvClient) {
@@ -1093,7 +1180,10 @@ async function writeStore(store) {
 let storeInitializationPromise = null;
 function ensureStoreInitialized() {
   if (!storeInitializationPromise) {
-    storeInitializationPromise = ensureStoreFile().catch(error => {
+    storeInitializationPromise = (async () => {
+      await getRedisClient();
+      await ensureStoreFile();
+    })().catch(error => {
       storeInitializationPromise = null;
       throw error;
     });
@@ -2848,11 +2938,43 @@ async function handleApiRequest(req, res, url) {
   }
 
   if (req.method === 'GET' && pathname === '/api/health') {
+    await getRedisClient();
     const storage = kvClient ? 'upstash' : isSqliteStorageActive() ? 'sqlite' : 'json';
-    const warning = (IS_VERCEL_RUNTIME && !kvClient)
-      ? 'Upstash Redis is not configured. Connect UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN in Vercel for cloud persistence.'
-      : undefined;
-    return sendJson(res, 200, { ok: true, storage, ...(warning ? { warning } : {}) });
+    return sendJson(res, 200, {
+      ok: true,
+      storage,
+      redis: {
+        configured: redisDiagnostics.configured,
+        urlDetected: redisDiagnostics.urlDetected,
+        tokenDetected: redisDiagnostics.tokenDetected,
+        clientCreated: redisDiagnostics.clientCreated,
+        pingOk: redisDiagnostics.pingOk,
+        rwOk: redisDiagnostics.rwOk,
+        error: redisDiagnostics.error,
+        testedAt: redisDiagnostics.testedAt,
+      },
+      runtime: IS_VERCEL_RUNTIME ? 'vercel' : 'node',
+      version: '1.0.0',
+    });
+  }
+
+  if (req.method === 'GET' && pathname === '/api/redis-test') {
+    redisInitPromise = null;
+    await getRedisClient();
+    return sendJson(res, 200, {
+      ok: Boolean(kvClient && redisDiagnostics.pingOk && redisDiagnostics.rwOk),
+      storage: kvClient ? 'upstash' : (IS_VERCEL_RUNTIME ? 'volatile' : 'sqlite'),
+      redis: {
+        configured: redisDiagnostics.configured,
+        urlDetected: redisDiagnostics.urlDetected,
+        tokenDetected: redisDiagnostics.tokenDetected,
+        clientCreated: redisDiagnostics.clientCreated,
+        pingOk: redisDiagnostics.pingOk,
+        rwOk: redisDiagnostics.rwOk,
+        error: redisDiagnostics.error,
+        testedAt: redisDiagnostics.testedAt,
+      },
+    });
   }
   if (req.method === 'GET' && pathname === '/api/restaurants') {
     return handleGetLiveRestaurants(req, res, url);
