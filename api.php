@@ -1,6 +1,9 @@
 <?php
 declare(strict_types=1);
 
+ini_set('display_errors', '0');
+error_reporting(E_ALL);
+
 // JSON-file PHP backend compatible with the browser app's existing /api/* routes.
 const USER_TTL = 604800000;
 const ADMIN_TTL = 43200000;
@@ -73,7 +76,20 @@ function api_main(): never {
         if($method==='GET'&&$path==='/api/admin/me')done($s,200,['access'=>access_payload($a)]);
         if($method==='GET'&&$path==='/api/admin/catalog')done($s,200,['stores'=>$stores,'summary'=>summary($stores),'globalSummary'=>summary(all_stores($s)),'access'=>access_payload($a)]);
         if($method==='GET'&&$path==='/api/admin/orders'){$orders=$a['role']==='store'?array_values(array_filter($s['orders'],fn($o)=>(int)($o['restId']??0)===(int)$a['storeId'])):$s['orders'];done($s,200,['orders'=>$orders,'access'=>access_payload($a)]);}
-        if(preg_match('#^/api/admin/orders/(.+)/status$#',$path,$m)&&$method==='PATCH'){$id=rawurldecode($m[1]);foreach($s['orders'] as &$o)if($o['orderId']===$id){$o['status']=clean_text($b['status']??'',40);unset($o);done($s,200,['order'=>$o,'access'=>access_payload($a)]);}unset($o);fail(404,'Order not found');}
+        if(preg_match('#^/api/admin/orders/(.+)/status$#',$path,$m)&&$method==='PATCH'){
+            $id=rawurldecode($m[1]);$nextStatus=clean_text($b['status']??'',40);
+            if(!in_array($nextStatus,['Pending','Confirmed','Delivered','Cancelled'],true))fail(400,'Invalid order status');
+            foreach($s['orders'] as &$o)if($o['orderId']===$id){
+                if($a['role']==='store'&&(int)($o['restId']??0)!==(int)$a['storeId'])fail(403,'Store managers can only update orders from their assigned store.');
+                $wasCancelled=($o['status']??'')==='Cancelled';$willCancel=$nextStatus==='Cancelled';
+                if(!$wasCancelled&&$willCancel){
+                    foreach($o['items']??[] as $line){$pid=(int)($line['id']??0);$qty=max(1,(int)($line['qty']??1));foreach($s['catalogStores'] as &$st)foreach($st['menu'] as &$p)if((int)$p['id']===$pid)$p['stock']=(int)($p['stock']??0)+$qty;unset($st,$p);}
+                    $o['stockReverted']=true;
+                }
+                $o['status']=$nextStatus;$savedOrder=$o;unset($o);done($s,200,['order'=>$savedOrder,'access'=>access_payload($a)]);
+            }
+            unset($o);fail(404,'Order not found');
+        }
         if(preg_match('#^/api/admin/products/(\d+)(/stock)?$#',$path,$m)&&$method==='PATCH'){$pid=(int)$m[1];foreach($s['catalogStores'] as &$st)foreach($st['menu'] as &$p)if((int)$p['id']===$pid){if($a['role']==='store'&&(int)$st['id']!==(int)$a['storeId'])fail(403,'Store managers can only manage products in their assigned store.');if(isset($m[2])&&$m[2]==='/stock')$p['stock']=max(0,(int)($b['stock']??(($p['stock']??0)+(int)($b['delta']??0))));else foreach(['name','desc','price','img','veg','bestseller','reorderLevel','category','unit','sku'] as $k)if(array_key_exists($k,$b))$p[$k]=$b[$k];$product=$p;$sid=$st['id'];unset($p,$st);done($s,200,['product'=>$product,'storeId'=>$sid,'summary'=>summary(scoped_stores(all_stores($s),$a)),'access'=>access_payload($a)]);}unset($p,$st);fail(404,'Product not found');}
         fail(404,'API route not found');
     }
