@@ -35,9 +35,116 @@
             "passwordSalt": "86733e20712c69325a18a39c6c77d026",
             "createdAt": 1776759828795,
             "updatedAt": 1776759907071
+        },
+        {
+            "id": "3efbab1e7a1c842e890b215bd77cc6f3",
+            "name": "Ashutosh Panda",
+            "email": "vansh@gmail.com",
+            "phone": "9430395911",
+            "address": "Kharar, Punjab Chandigarh University, Mohali",
+            "favourites": [
+                304
+            ],
+            "passwordSalt": "870f76d33798f9f60ba780938c7a805c",
+            "passwordHash": "900893ea3d1c639a3babe829c18303a7959d783fd90f137c0ba1210482fd4ca584631c6d3e62aef7ae4fd997fe53ff9cbdd9287e06f06d7049a50ef9e73dc97f",
+            "createdAt": 1795083808453,
+            "updatedAt": 1795083883936
+        },
+        {
+            "id": "18b2122ae85b68f89f85aef64f900fdc",
+            "name": "Ashutosh Panda",
+            "email": "ashutoshpanda933@gmail.com",
+            "phone": "9430395911",
+            "address": "Kharar, Punjab Chandigarh University, Mohali",
+            "favourites": [
+                304,
+                302
+            ],
+            "passwordSalt": "74ee66daddfda743dcc6a15c9221890d",
+            "passwordHash": "69b6cdf340e620001403e223dfd4be8bd77e4edd08264fe744f746db4914d54c7e14f9e8e8adc640f61cadd5ee05b0a4bf5d6f4cfa5e32f6a1ffe96d3ed6def6",
+            "createdAt": 1795087225664,
+            "updatedAt": 1795087240023
         }
     ],
     "orders": [
+        {
+            "orderId": "GB1795087240023744",
+            "restId": 301,
+            "restName": "FreshBasket Market",
+            "restImg": "",
+            "customer": {
+                "name": "Ashutosh Panda",
+                "phone": "9430395911",
+                "address": "Kharar, Punjab Chandigarh University, Mohali",
+                "note": ""
+            },
+            "userId": "18b2122ae85b68f89f85aef64f900fdc",
+            "userEmail": "ashutoshpanda933@gmail.com",
+            "items": [
+                {
+                    "id": 30101,
+                    "restId": 301,
+                    "name": "Banana (6 pcs)",
+                    "price": 48,
+                    "img": "https://images.unsplash.com/photo-1574226516831-e1dff420e8f8?w=400&q=80&auto=format",
+                    "qty": 1,
+                    "sku": "FBR-BAN-6",
+                    "unit": "pack",
+                    "category": "fruits"
+                }
+            ],
+            "subtotal": 48,
+            "tax": 2,
+            "delivery": 35,
+            "total": 85,
+            "couponCode": "",
+            "discount": 0,
+            "payment": "UPI",
+            "status": "Confirmed",
+            "date": "19 Nov 2026, 11:20:40 AM",
+            "createdAt": 1795087240023,
+            "etaMinutes": 18,
+            "stockReverted": false
+        },
+        {
+            "orderId": "GB1795083883936632",
+            "restId": 301,
+            "restName": "FreshBasket Market",
+            "restImg": "",
+            "customer": {
+                "name": "Ashutosh Panda",
+                "phone": "9430395911",
+                "address": "Kharar, Punjab Chandigarh University, Mohali",
+                "note": "as soon as possible"
+            },
+            "userId": "3efbab1e7a1c842e890b215bd77cc6f3",
+            "userEmail": "vansh@gmail.com",
+            "items": [
+                {
+                    "id": 30102,
+                    "restId": 301,
+                    "name": "Apple Royal Gala (1 kg)",
+                    "price": 169,
+                    "img": "https://images.unsplash.com/photo-1567306226416-28f0efdc88ce?w=400&q=80&auto=format",
+                    "qty": 1,
+                    "sku": "FBR-APP-1K",
+                    "unit": "kg",
+                    "category": "fruits"
+                }
+            ],
+            "subtotal": 169,
+            "tax": 8,
+            "delivery": 35,
+            "total": 212,
+            "couponCode": "",
+            "discount": 0,
+            "payment": "UPI",
+            "status": "Confirmed",
+            "date": "19 Nov 2026, 10:24:43 AM",
+            "createdAt": 1795083883936,
+            "etaMinutes": 18,
+            "stockReverted": false
+        },
         {
             "orderId": "GB1777219054968335",
             "restId": 301,
@@ -154,7 +261,7 @@
             "couponCode": "FIRST50",
             "discount": 50,
             "payment": "UPI",
-            "status": "Delivered",
+            "status": "Confirmed",
             "date": "26 Apr 2026, 8:05:09 pm",
             "createdAt": 1777214109460,
             "etaMinutes": 18,
@@ -198,7 +305,7 @@
             "couponCode": "FIRST50",
             "discount": 50,
             "payment": "COD",
-            "status": "Delivered",
+            "status": "Confirmed",
             "date": "23 Apr 2026, 3:30:39 pm",
             "createdAt": 1776938439248,
             "etaMinutes": 24
@@ -233,10 +340,11 @@
             "couponCode": "FIRST50",
             "discount": 50,
             "payment": "COD",
-            "status": "Delivered",
+            "status": "Cancelled",
             "date": "21 Apr 2026, 1:55:07 pm",
             "createdAt": 1776759907071,
-            "etaMinutes": 30
+            "etaMinutes": 30,
+            "stockReverted": true
         },
         {
             "orderId": "GB1776757902228911",
@@ -393,6 +501,12 @@
             "userId": "820c4fcf-94b3-4d9f-84dd-a4df0b0f785f",
             "createdAt": 1795083581036,
             "expiresAt": 1795688381036
+        },
+        {
+            "token": "367cdb70611fc8383c5469be25afe37adc76000d533b70c338b67f75f43327c8",
+            "userId": "18b2122ae85b68f89f85aef64f900fdc",
+            "createdAt": 1795087225664,
+            "expiresAt": 1795692025664
         }
     ],
     "adminSessions": [
@@ -409,6 +523,20 @@
             "storeId": 301,
             "createdAt": 1795083598631,
             "expiresAt": 1795126798631
+        },
+        {
+            "token": "d1ede7e4166a403e8e5a1687336207973fab672befba7bafa8b4416094dc9e0a",
+            "role": "super",
+            "storeId": null,
+            "createdAt": 1795084128887,
+            "expiresAt": 1795127328887
+        },
+        {
+            "token": "df0f8b6bb15464f48c18b77fe8d0f046156b640397209dcc1ff0531dbd12e915",
+            "role": "super",
+            "storeId": null,
+            "createdAt": 1795096461339,
+            "expiresAt": 1795139661339
         }
     ],
     "catalogStores": [
@@ -438,7 +566,7 @@
                     "img": "https://unsplash.com/photos/strawberry-and-blackberry-on-clear-glass-display-counter-1WmlAiYgnoI",
                     "veg": true,
                     "bestseller": false,
-                    "stock": 10,
+                    "stock": 15,
                     "reorderLevel": 1,
                     "category": "bakery",
                     "unit": "pack",
@@ -454,7 +582,7 @@
                     "img": "https://images.unsplash.com/photo-1574226516831-e1dff420e8f8?w=400&q=80&auto=format",
                     "veg": true,
                     "bestseller": true,
-                    "stock": 119,
+                    "stock": 118,
                     "reorderLevel": 20,
                     "category": "fruits",
                     "unit": "pack",
@@ -470,7 +598,7 @@
                     "img": "https://images.unsplash.com/photo-1567306226416-28f0efdc88ce?w=400&q=80&auto=format",
                     "veg": true,
                     "bestseller": true,
-                    "stock": 62,
+                    "stock": 61,
                     "reorderLevel": 14,
                     "category": "fruits",
                     "unit": "kg",
@@ -1178,6 +1306,24 @@
                     "tags": []
                 }
             ]
+        },
+        {
+            "id": 306,
+            "name": "Panda Store",
+            "cuisine": "",
+            "rating": 4.5,
+            "deliveryTime": 18,
+            "minOrder": 199,
+            "avgCost": 500,
+            "category": "bakery",
+            "promo": "fresh cakes and pastry",
+            "tags": [
+                "New Store",
+                "cake"
+            ],
+            "img": "",
+            "address": "Kharar, Punjab",
+            "menu": []
         }
     ],
     "storeManagers": [
@@ -1215,6 +1361,13 @@
             "passwordSalt": "2d393ade5c384b184007f51844f53f47",
             "createdAt": 1777236978845,
             "updatedAt": 1777236978845
+        },
+        {
+            "storeId": 306,
+            "passwordSalt": "5db4a1f19a69ad849ef671f7fee9a590",
+            "passwordHash": "82858b615e98313748924ec3ddb6e8ee65b5d2083ede72348eb190a05ac2b2431e18e32df4bc2d897ff8ee32d0ce7d0b469809d59d484ae28533b324617083ce",
+            "createdAt": 1795096528304,
+            "updatedAt": 1795096528304
         }
     ]
 }
