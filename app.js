@@ -5,6 +5,69 @@
 // ══════════════════════════════════════════════
 
 // ─────────────────────────────────────────────
+//  SAFE BROWSER / SSR STORAGE ABSTRACTION
+// ─────────────────────────────────────────────
+const isBrowser = typeof window !== 'undefined' && typeof document !== 'undefined';
+
+function createStorageShim() {
+  const store = new Map();
+  return {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, val) => { store.set(key, String(val)); },
+    removeItem: (key) => { store.delete(key); },
+    clear: () => { store.clear(); },
+    key: (index) => Array.from(store.keys())[index] || null,
+    get length() { return store.size; },
+  };
+}
+
+function resolveStorage(type) {
+  if (isBrowser) {
+    try {
+      const storage = window[type];
+      if (storage && typeof storage.getItem === 'function') {
+        const testKey = '__gb_test_storage__';
+        storage.setItem(testKey, testKey);
+        storage.removeItem(testKey);
+        return storage;
+      }
+    } catch {
+      // Storage access blocked or restricted by browser policy
+    }
+  }
+  return createStorageShim();
+}
+
+const safeLocalStorage = resolveStorage('localStorage');
+const safeSessionStorage = resolveStorage('sessionStorage');
+
+// Global scope polyfills for Node.js / Vercel serverless execution
+if (typeof globalThis !== 'undefined') {
+  if (typeof globalThis.localStorage === 'undefined') {
+    try {
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: safeLocalStorage,
+        writable: true,
+        configurable: true,
+      });
+    } catch {
+      globalThis.localStorage = safeLocalStorage;
+    }
+  }
+  if (typeof globalThis.sessionStorage === 'undefined') {
+    try {
+      Object.defineProperty(globalThis, 'sessionStorage', {
+        value: safeSessionStorage,
+        writable: true,
+        configurable: true,
+      });
+    } catch {
+      globalThis.sessionStorage = safeSessionStorage;
+    }
+  }
+}
+
+// ─────────────────────────────────────────────
 //  DATABASE: Categories
 // ─────────────────────────────────────────────
 const categories = [
@@ -126,7 +189,7 @@ const restaurantDirectory = new Map(demoRestaurants.map(restaurant => [restauran
 // ─────────────────────────────────────────────
 //  CART STATE
 // ─────────────────────────────────────────────
-let cart         = JSON.parse(localStorage.getItem('qb_cart')    || '[]');
+let cart         = JSON.parse(safeLocalStorage.getItem('qb_cart')    || '[]');
 let currentRest  = null;
 let currentPage  = 'home';
 let prevPage     = 'home';
@@ -134,16 +197,16 @@ let activeCat    = 'all';
 let currentSort  = 'rating';
 let searchQuery  = '';
 let currentUser  = null;
-let guestFavourites = JSON.parse(localStorage.getItem('qb_guest_favourites') || '[]');
+let guestFavourites = JSON.parse(safeLocalStorage.getItem('qb_guest_favourites') || '[]');
 let favourites   = [...guestFavourites];
-let appliedCouponCode = localStorage.getItem('qb_coupon') || '';
+let appliedCouponCode = safeLocalStorage.getItem('qb_coupon') || '';
 let authMode     = 'login';
 let authIntent   = null;
 let trackingOrderId = '';
 let trackingTimerId = null;
 let ordersRefreshTimerId = null;
 let orderSuccessAnimationTimerId = null;
-let successOrderId = sessionStorage.getItem('qb_success_order') || '';
+let successOrderId = safeSessionStorage.getItem('qb_success_order') || '';
 let ordersCache = [];
 let adminOrdersCache = [];
 let adminCatalogCache = { stores: [], summary: null, globalSummary: null, access: null };
@@ -205,11 +268,11 @@ const LOCAL_DEMO_STORE_KEY = 'gb_local_demo_backend_store_v1';
 const LOCAL_ADMIN_PASSWORD = 'GREENBASKET@2026';
 const LOCAL_USER_SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const LOCAL_ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 12;
-let activeLocation = localStorage.getItem('gb_location') || localStorage.getItem('qb_location') || availableLocations[0];
-let adminAuthenticated = Boolean(sessionStorage.getItem(ADMIN_TOKEN_KEY) || sessionStorage.getItem('qb_admin_token'));
+let activeLocation = safeLocalStorage.getItem('gb_location') || safeLocalStorage.getItem('qb_location') || availableLocations[0];
+let adminAuthenticated = Boolean(safeSessionStorage.getItem(ADMIN_TOKEN_KEY) || safeSessionStorage.getItem('qb_admin_token'));
 let adminAccess = (() => {
   try {
-    const parsed = JSON.parse(sessionStorage.getItem(ADMIN_ACCESS_KEY) || sessionStorage.getItem('qb_admin_access') || 'null');
+    const parsed = JSON.parse(safeSessionStorage.getItem(ADMIN_ACCESS_KEY) || safeSessionStorage.getItem('qb_admin_access') || 'null');
     if (parsed && typeof parsed === 'object') return parsed;
   } catch {}
 
@@ -443,27 +506,27 @@ function ensureLocalDemoShape(source) {
 }
 
 function readLocalDemoStore() {
-  const raw = localStorage.getItem(LOCAL_DEMO_STORE_KEY);
+  const raw = safeLocalStorage.getItem(LOCAL_DEMO_STORE_KEY);
   if (!raw) {
     const initial = ensureLocalDemoShape(createInitialLocalDemoStore());
-    localStorage.setItem(LOCAL_DEMO_STORE_KEY, JSON.stringify(initial));
+    safeLocalStorage.setItem(LOCAL_DEMO_STORE_KEY, JSON.stringify(initial));
     return initial;
   }
 
   try {
     const parsed = JSON.parse(raw);
     const normalized = ensureLocalDemoShape(parsed);
-    localStorage.setItem(LOCAL_DEMO_STORE_KEY, JSON.stringify(normalized));
+    safeLocalStorage.setItem(LOCAL_DEMO_STORE_KEY, JSON.stringify(normalized));
     return normalized;
   } catch {
     const fresh = ensureLocalDemoShape(createInitialLocalDemoStore());
-    localStorage.setItem(LOCAL_DEMO_STORE_KEY, JSON.stringify(fresh));
+    safeLocalStorage.setItem(LOCAL_DEMO_STORE_KEY, JSON.stringify(fresh));
     return fresh;
   }
 }
 
 function writeLocalDemoStore(state) {
-  localStorage.setItem(LOCAL_DEMO_STORE_KEY, JSON.stringify(state));
+  safeLocalStorage.setItem(LOCAL_DEMO_STORE_KEY, JSON.stringify(state));
 }
 
 function pruneLocalSessions(state) {
@@ -1376,19 +1439,19 @@ async function localApiRequest(endpoint, options = {}) {
   throw localCreateError('API route not found', 404);
 }
 
-function saveCart() { localStorage.setItem('qb_cart', JSON.stringify(cart)); }
-function saveGuestFavourites() { localStorage.setItem('qb_guest_favourites', JSON.stringify(guestFavourites)); }
+function saveCart() { safeLocalStorage.setItem('qb_cart', JSON.stringify(cart)); }
+function saveGuestFavourites() { safeLocalStorage.setItem('qb_guest_favourites', JSON.stringify(guestFavourites)); }
 function saveCoupon() {
-  if (appliedCouponCode) localStorage.setItem('qb_coupon', appliedCouponCode);
-  else localStorage.removeItem('qb_coupon');
+  if (appliedCouponCode) safeLocalStorage.setItem('qb_coupon', appliedCouponCode);
+  else safeLocalStorage.removeItem('qb_coupon');
 }
 
 function getAuthToken() {
-  return localStorage.getItem(AUTH_TOKEN_KEY) || '';
+  return safeLocalStorage.getItem(AUTH_TOKEN_KEY) || '';
 }
 
 function getAdminToken() {
-  return sessionStorage.getItem(ADMIN_TOKEN_KEY) || '';
+  return safeSessionStorage.getItem(ADMIN_TOKEN_KEY) || '';
 }
 
 function syncFavouritesState() {
@@ -1401,12 +1464,12 @@ function setCurrentUser(user) {
 }
 
 function setAuthSession(token, user) {
-  if (token) localStorage.setItem(AUTH_TOKEN_KEY, token);
+  if (token) safeLocalStorage.setItem(AUTH_TOKEN_KEY, token);
   setCurrentUser(user);
 }
 
 function clearAuthSession() {
-  localStorage.removeItem(AUTH_TOKEN_KEY);
+  safeLocalStorage.removeItem(AUTH_TOKEN_KEY);
   setCurrentUser(null);
   ordersCache = [];
   userOrderCount = 0;
@@ -1425,7 +1488,7 @@ function normalizeAdminAccess(access) {
 
 function setAdminAccess(access) {
   adminAccess = normalizeAdminAccess(access || {});
-  sessionStorage.setItem(ADMIN_ACCESS_KEY, JSON.stringify(adminAccess));
+  safeSessionStorage.setItem(ADMIN_ACCESS_KEY, JSON.stringify(adminAccess));
 }
 
 function isStoreAdminAccess() {
@@ -1433,14 +1496,14 @@ function isStoreAdminAccess() {
 }
 
 function setAdminSession(token, access = null) {
-  if (token) sessionStorage.setItem(ADMIN_TOKEN_KEY, token);
+  if (token) safeSessionStorage.setItem(ADMIN_TOKEN_KEY, token);
   adminAuthenticated = Boolean(token);
   if (access) setAdminAccess(access);
 }
 
 function clearAdminSession() {
-  sessionStorage.removeItem(ADMIN_TOKEN_KEY);
-  sessionStorage.removeItem(ADMIN_ACCESS_KEY);
+  safeSessionStorage.removeItem(ADMIN_TOKEN_KEY);
+  safeSessionStorage.removeItem(ADMIN_ACCESS_KEY);
   adminAuthenticated = false;
   adminAccess = normalizeAdminAccess({ role: 'super' });
   adminOrdersCache = [];
@@ -2115,7 +2178,8 @@ function toggleLocationDrop(event) {
 
 function setLocation(location) {
   activeLocation = location;
-  localStorage.setItem('qb_location', activeLocation);
+  safeLocalStorage.setItem('gb_location', activeLocation);
+  safeLocalStorage.setItem('qb_location', activeLocation);
   updateLocationLabel();
   renderLocationOptions();
   closeLocationDrop();
@@ -2634,7 +2698,7 @@ async function renderTrackingPage(orderId = trackingOrderId) {
       stopTrackingTimer();
       if (successOrderId === order.orderId) {
         successOrderId = '';
-        sessionStorage.removeItem('qb_success_order');
+        safeSessionStorage.removeItem('qb_success_order');
       }
     } else {
       startTrackingTimer(order.orderId);
@@ -2642,10 +2706,10 @@ async function renderTrackingPage(orderId = trackingOrderId) {
 
     if (showSuccess) {
       // Persist success UI while the order is still in-progress.
-      sessionStorage.setItem('qb_success_order', successOrderId);
+      safeSessionStorage.setItem('qb_success_order', successOrderId);
     } else if (successOrderId === order.orderId) {
       successOrderId = '';
-      sessionStorage.removeItem('qb_success_order');
+      safeSessionStorage.removeItem('qb_success_order');
     }
   } catch (error) {
     handleSessionExpiry(error, { auth: true });
@@ -3585,7 +3649,7 @@ async function placeOrder() {
     toast(`Order placed! ID: ${order.orderId}`, 'success');
     trackingOrderId = order.orderId;
     successOrderId = order.orderId;
-    sessionStorage.setItem('qb_success_order', successOrderId);
+    safeSessionStorage.setItem('qb_success_order', successOrderId);
     showPage('tracking');
   } catch (error) {
     handleSessionExpiry(error, { auth: true });
@@ -4723,59 +4787,79 @@ function toast(msg, type='success') {
 // ─────────────────────────────────────────────
 //  INIT
 // ─────────────────────────────────────────────
-window.onload = async function() {
-  updateBackendModePill();
+if (typeof window !== 'undefined') {
+  window.onload = async function() {
+    updateBackendModePill();
 
-  if (window.location.protocol === 'file:') {
-    toast('Run `npm start` and open http://127.0.0.1:3000 to use the real backend.', 'info');
-  }
-
-  await restoreUserSession();
-  cart = (Array.isArray(cart) ? cart : [])
-    .map(item => ({
-      ...item,
-      id: Number(item?.id) || 0,
-      restId: Number(item?.restId) || 0,
-      qty: Math.max(1, Number(item?.qty) || 1),
-    }))
-    .filter(item => item.id && item.restId && item.qty);
-  saveCart();
-  setRestaurants([], 'catalog');
-  updateLocationLabel();
-  renderLocationOptions();
-  updateCartCount();
-  updateAuthUI();
-  updateAdminActions();
-  if (adminAuthenticated) {
-    try {
-      await fetchAdminAccess();
-    } catch (error) {
-      handleSessionExpiry(error, { admin: true });
+    if (window.location.protocol === 'file:') {
+      toast('Run `npm start` and open http://127.0.0.1:3000 to use the real backend.', 'info');
     }
+
+    await restoreUserSession();
+    cart = (Array.isArray(cart) ? cart : [])
+      .map(item => ({
+        ...item,
+        id: Number(item?.id) || 0,
+        restId: Number(item?.restId) || 0,
+        qty: Math.max(1, Number(item?.qty) || 1),
+      }))
+      .filter(item => item.id && item.restId && item.qty);
+    saveCart();
+    setRestaurants([], 'catalog');
+    updateLocationLabel();
+    renderLocationOptions();
+    updateCartCount();
+    updateAuthUI();
     updateAdminActions();
-  }
-  renderHomePage();
-  document.getElementById('homePage').classList.add('active');
-  loadRestaurantsForLocation(activeLocation, { toastOnFail: false });
-
-  document.addEventListener('click', event => {
-    const locationWrap = document.querySelector('.nav-location-wrap');
-    const checkoutModal = document.getElementById('checkoutModal');
-    const adminModal = document.getElementById('adminAuthModal');
-    const authModal = document.getElementById('authModal');
-
-    if (locationWrap && !locationWrap.contains(event.target)) closeLocationDrop();
-    if (event.target === checkoutModal) closeModal();
-    if (event.target === adminModal) closeAdminModal();
-    if (event.target === authModal) closeAuthModal();
-  });
-
-  document.addEventListener('keydown', event => {
-    if (event.key === 'Escape') {
-      closeLocationDrop();
-      closeModal();
-      closeAdminModal();
-      closeAuthModal();
+    if (adminAuthenticated) {
+      try {
+        await fetchAdminAccess();
+      } catch (error) {
+        handleSessionExpiry(error, { admin: true });
+      }
+      updateAdminActions();
     }
-  });
-};
+    renderHomePage();
+    document.getElementById('homePage').classList.add('active');
+    loadRestaurantsForLocation(activeLocation, { toastOnFail: false });
+
+    document.addEventListener('click', event => {
+      const locationWrap = document.querySelector('.nav-location-wrap');
+      const checkoutModal = document.getElementById('checkoutModal');
+      const adminModal = document.getElementById('adminAuthModal');
+      const authModal = document.getElementById('authModal');
+
+      if (locationWrap && !locationWrap.contains(event.target)) closeLocationDrop();
+      if (event.target === checkoutModal) closeModal();
+      if (event.target === adminModal) closeAdminModal();
+      if (event.target === authModal) closeAuthModal();
+    });
+
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        closeLocationDrop();
+        closeModal();
+        closeAdminModal();
+        closeAuthModal();
+      }
+    });
+  };
+}
+
+// ─────────────────────────────────────────────
+//  SERVERLESS ENTRYPOINT SAFEGUARD (Vercel)
+// ─────────────────────────────────────────────
+// If Vercel mistakenly bundles or invokes root app.js as a serverless function,
+// delegate cleanly to server.js requestHandler instead of failing with 500.
+if (typeof module !== 'undefined' && module.exports) {
+  try {
+    const serverModule = require('./server.js');
+    module.exports = serverModule.requestHandler || serverModule;
+  } catch {
+    module.exports = (req, res) => {
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.end('GREENBASKET');
+    };
+  }
+}

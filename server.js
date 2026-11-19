@@ -26,14 +26,21 @@ const SQLITE_STORAGE_ENABLED = process.env.GB_ENABLE_SQLITE !== '0' && process.e
 
 let kvClient = null;
 try {
-  const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
-  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+  const redisUrl = process.env.UPSTASH_REDIS_REST_URL
+    || process.env.KV_REST_API_URL
+    || process.env.REDIS_URL
+    || process.env.UPSTASH_URL;
+  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN
+    || process.env.KV_REST_API_TOKEN
+    || process.env.REDIS_TOKEN
+    || process.env.UPSTASH_TOKEN;
   if (redisUrl && redisToken) {
     const { Redis } = require('@upstash/redis');
     kvClient = new Redis({ url: redisUrl, token: redisToken });
+    console.log('Upstash Redis storage initialized successfully.');
   }
 } catch (error) {
-  console.warn('Upstash Redis is unavailable; persistent Vercel storage is disabled.');
+  console.warn('Upstash Redis client failed to initialize:', error.message);
 }
 
 let SqliteDatabaseSync = null;
@@ -913,23 +920,51 @@ function createStorageUnavailableError() {
   return error;
 }
 
+async function getSeedStoreSnapshot() {
+  try {
+    const raw = await fs.readFile(STORE_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      return migrateStoreShape(parsed);
+    }
+  } catch (err) {
+    console.warn('Could not read seed store.json, using default schema:', err.message);
+  }
+  return migrateStoreShape(null);
+}
+
 async function readStoreFromKV() {
   if (!kvClient) return null;
-  const stored = await kvClient.get(KV_STORE_KEY);
-  if (!stored || typeof stored !== 'object') return null;
-  return migrateStoreShape(stored);
+  try {
+    let stored = await kvClient.get(KV_STORE_KEY);
+    if (typeof stored === 'string') {
+      try {
+        stored = JSON.parse(stored);
+      } catch {}
+    }
+    if (!stored || typeof stored !== 'object') return null;
+    return migrateStoreShape(stored);
+  } catch (err) {
+    console.error('Failed to read store from Upstash Redis:', err.message);
+    return null;
+  }
 }
 
 async function writeStoreToKV(store) {
   if (!kvClient) return;
-  await kvClient.set(KV_STORE_KEY, store);
+  try {
+    await kvClient.set(KV_STORE_KEY, store);
+  } catch (err) {
+    console.error('Failed to write store to Upstash Redis:', err.message);
+  }
 }
 
 async function ensureStoreFile() {
   if (kvClient) {
     const stored = await readStoreFromKV();
     if (!stored) {
-      await writeStoreToKV(migrateStoreShape(null));
+      const seed = await getSeedStoreSnapshot();
+      await writeStoreToKV(seed);
     }
     return;
   }
@@ -992,9 +1027,9 @@ async function readStore() {
     const stored = await readStoreFromKV();
     if (stored) return stored;
 
-    const fresh = migrateStoreShape(null);
-    await writeStoreToKV(fresh);
-    return fresh;
+    const seed = await getSeedStoreSnapshot();
+    await writeStoreToKV(seed);
+    return seed;
   }
 
   if (isSqliteStorageActive()) {
@@ -1008,7 +1043,19 @@ async function readStore() {
   }
 
   if (IS_VERCEL_RUNTIME) {
-    throw createStorageUnavailableError();
+    // Vercel serverless environment fallback when Upstash Redis is not yet linked
+    const tmpStorePath = path.join('/tmp', 'greenbasket-store.json');
+    try {
+      const raw = await fs.readFile(tmpStorePath, 'utf8');
+      return migrateStoreShape(JSON.parse(raw));
+    } catch {}
+
+    try {
+      const raw = await fs.readFile(STORE_PATH, 'utf8');
+      return migrateStoreShape(JSON.parse(raw));
+    } catch {
+      return migrateStoreShape(null);
+    }
   }
 
   const raw = await fs.readFile(STORE_PATH, 'utf8');
@@ -1030,7 +1077,14 @@ async function writeStore(store) {
   }
 
   if (IS_VERCEL_RUNTIME) {
-    throw createStorageUnavailableError();
+    // Vercel serverless environment fallback when Upstash Redis is not yet linked
+    try {
+      const tmpStorePath = path.join('/tmp', 'greenbasket-store.json');
+      await fs.writeFile(tmpStorePath, JSON.stringify(nextStore, null, 2));
+    } catch (err) {
+      console.warn('Could not write to temporary lambda storage:', err.message);
+    }
+    return;
   }
 
   await fs.writeFile(STORE_PATH, JSON.stringify(nextStore, null, 2));
@@ -1048,15 +1102,25 @@ function ensureStoreInitialized() {
 }
 
 function sendJson(res, statusCode, payload) {
-  res.writeHead(statusCode, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Cache-Control': 'no-store',
-  });
+  if (typeof res.writeHead === 'function') {
+    res.writeHead(statusCode, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+    });
+  } else {
+    res.statusCode = statusCode;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+  }
   res.end(JSON.stringify(payload));
 }
 
 function sendNoContent(res) {
-  res.writeHead(204);
+  if (typeof res.writeHead === 'function') {
+    res.writeHead(204);
+  } else {
+    res.statusCode = 204;
+  }
   res.end();
 }
 
@@ -2698,12 +2762,17 @@ async function handleGetLiveRestaurants(req, res, url) {
 async function handleApiRequest(req, res, url) {
   const { pathname } = url;
 
-  if (req.method === 'GET' && pathname === '/api/health') {
-    if (IS_VERCEL_RUNTIME && !kvClient) {
-      return sendError(res, 503, 'Persistent storage is not configured. Connect an Upstash Redis database to this deployment.');
-    }
+  if (req.method === 'GET' && (pathname === '/api' || pathname === '/api/')) {
     const storage = kvClient ? 'upstash' : isSqliteStorageActive() ? 'sqlite' : 'json';
-    return sendJson(res, 200, { ok: true, storage });
+    return sendJson(res, 200, { ok: true, name: 'GREENBASKET API', storage, version: '1.0.0' });
+  }
+
+  if (req.method === 'GET' && pathname === '/api/health') {
+    const storage = kvClient ? 'upstash' : isSqliteStorageActive() ? 'sqlite' : 'json';
+    const warning = (IS_VERCEL_RUNTIME && !kvClient)
+      ? 'Upstash Redis is not configured. Connect UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN in Vercel for cloud persistence.'
+      : undefined;
+    return sendJson(res, 200, { ok: true, storage, ...(warning ? { warning } : {}) });
   }
   if (req.method === 'GET' && pathname === '/api/restaurants') {
     return handleGetLiveRestaurants(req, res, url);
@@ -2776,33 +2845,61 @@ async function serveStatic(req, res, url) {
   }
 
   const pathname = url.pathname === '/' ? '/index.html' : url.pathname;
-  const filePath = path.resolve(ROOT_DIR, `.${pathname}`);
 
-  if (!filePath.startsWith(ROOT_DIR)) {
-    return sendError(res, 403, 'Forbidden');
+  // Try public/ directory first, then ROOT_DIR
+  let filePath = path.resolve(ROOT_DIR, 'public', `.${pathname}`);
+  let found = false;
+  try {
+    const s = await fs.stat(filePath);
+    if (s.isFile()) found = true;
+  } catch {}
+
+  if (!found) {
+    filePath = path.resolve(ROOT_DIR, `.${pathname}`);
+    try {
+      const s = await fs.stat(filePath);
+      if (s.isFile()) found = true;
+    } catch {}
   }
 
-  try {
-    const data = await fs.readFile(filePath);
-    const ext = path.extname(filePath);
-    const contentType = mimeTypes[ext] || 'application/octet-stream';
-    res.writeHead(200, { 'Content-Type': contentType });
-    if (req.method === 'HEAD') {
-      res.end();
-      return;
+  if (found) {
+    if (!filePath.startsWith(ROOT_DIR)) {
+      return sendError(res, 403, 'Forbidden');
     }
-    res.end(data);
-  } catch {
-    if (!path.extname(pathname)) {
-      const indexPath = path.join(ROOT_DIR, 'index.html');
+    try {
+      const data = await fs.readFile(filePath);
+      const ext = path.extname(filePath);
+      const contentType = mimeTypes[ext] || 'application/octet-stream';
+      res.writeHead(200, { 'Content-Type': contentType });
+      if (req.method === 'HEAD') {
+        res.end();
+        return;
+      }
+      res.end(data);
+      return;
+    } catch (err) {
+      console.error('Error reading static file:', err.message);
+      return sendError(res, 500, 'Error reading file');
+    }
+  }
+
+  // SPA fallback for routes without extension
+  if (!path.extname(pathname)) {
+    try {
+      let indexPath = path.join(ROOT_DIR, 'public', 'index.html');
+      try {
+        await fs.access(indexPath);
+      } catch {
+        indexPath = path.join(ROOT_DIR, 'index.html');
+      }
       const data = await fs.readFile(indexPath);
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(data);
       return;
-    }
-
-    sendError(res, 404, 'File not found');
+    } catch {}
   }
+
+  sendError(res, 404, 'File not found');
 }
 
 async function requestHandler(req, res) {
@@ -2815,9 +2912,11 @@ async function requestHandler(req, res) {
       return;
     }
 
-    const url = new URL(req.url, `http://${req.headers.host}`);
+    const host = req.headers['x-forwarded-host'] || req.headers.host || '127.0.0.1';
+    const protocol = req.headers['x-forwarded-proto'] || 'http';
+    const url = new URL(req.url, `${protocol}://${host}`);
 
-    if (url.pathname.startsWith('/api/')) {
+    if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
       await handleApiRequest(req, res, url);
       return;
     }
@@ -2848,25 +2947,26 @@ function createServer() {
   });
 }
 
-async function startServer() {
+async function startServer(portOverride) {
   if (!kvClient && !IS_VERCEL_RUNTIME && !isSqliteStorageActive()) {
     throw new Error('SQLite storage is unavailable. Use Node.js 22.5 or newer and keep GB_ENABLE_SQLITE enabled.');
   }
   await ensureStoreInitialized();
   const server = createServer();
+  const portToUse = toWholeNumber(portOverride, PORT);
 
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     if (HOST) {
-      server.listen(PORT, HOST, resolve);
+      server.listen(portToUse, HOST, resolve);
       return;
     }
 
-    server.listen(PORT, resolve);
+    server.listen(portToUse, resolve);
   });
 
   const hostLabel = HOST || '0.0.0.0';
-  console.log(`GREENBASKET server running at http://${hostLabel}:${PORT}`);
+  console.log(`GREENBASKET server running at http://${hostLabel}:${portToUse}`);
   return server;
 }
 

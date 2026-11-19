@@ -2,10 +2,17 @@
   "name": "greenbasket-grocery",
   "version": "1.0.0",
   "private": true,
-  "description": "GREENBASKET grocery app with PHP backend and local demo fallback",
+  "description": "GREENBASKET — Online Grocery Management Web Application",
   "author": "Ashutosh Panda",
+  "main": "server.js",
   "scripts": {
-    "start": "php -S 127.0.0.1:3000 -t . php-router.php",
-    "dev": "php -S 127.0.0.1:3000 -t . php-router.php"
+    "start": "node server.js",
+    "dev": "node server.js",
+    "server:node": "node server.js",
+    "server:php": "php -S 127.0.0.1:3000 -t . php-router.php",
+    "test": "node --check server.js && node --check app.js"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.41.0"
   }
 }
