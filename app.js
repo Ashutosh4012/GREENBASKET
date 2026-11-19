@@ -1516,147 +1516,72 @@ function clearAdminSession() {
 function resolveApiBaseUrl() {
   if (typeof window === 'undefined') return `http://127.0.0.1:${DEFAULT_API_PORT}`;
 
-  const { protocol, hostname, origin } = window.location;
+  const { protocol, origin } = window.location;
   if (protocol === 'file:') {
     return `http://127.0.0.1:${DEFAULT_API_PORT}`;
   }
 
-  const isPrivateIpv4 = /^10\./.test(hostname)
-    || /^192\.168\./.test(hostname)
-    || /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
-  const isLocalHost = hostname === 'localhost'
-    || hostname === '127.0.0.1'
-    || hostname === '::1'
-    || hostname.endsWith('.local')
-    || isPrivateIpv4;
-  if (isLocalHost) {
-    // Force IPv4 localhost for backend to avoid localhost/IPv6 resolution mismatch.
-    return `http://127.0.0.1:${DEFAULT_API_PORT}`;
-  }
-
-  // In deployed environments (like Vercel), use same-origin API routes.
-  return origin || `http://127.0.0.1:${DEFAULT_API_PORT}`;
+  // Same-origin relative URLs for all web environments (Vercel, localhost, custom domains)
+  return origin || '';
 }
 
 async function apiRequest(endpoint, options = {}) {
   const { method = 'GET', body, auth = false, admin = false } = options;
   const headers = {
     'Content-Type': 'application/json',
+    'Accept': 'application/json',
   };
 
   const token = admin ? getAdminToken() : auth ? getAuthToken() : '';
-  const requiresSessionToken = (auth || admin) && Boolean(token);
-  const userToken = getAuthToken();
-  const adminToken = getAdminToken();
-  const hasStickyLocalUserSession = Boolean(userToken) && hasLocalDemoSessionToken(userToken, { admin: false });
-  const hasStickyLocalAdminSession = Boolean(adminToken) && hasLocalDemoSessionToken(adminToken, { admin: true });
-  const hasStickyLocalSession = hasStickyLocalUserSession || hasStickyLocalAdminSession;
-  if (method === 'POST' && endpoint === '/api/orders' && hasStickyLocalUserSession) {
-    const error = new Error('This account was created in browser demo mode. Sign out and create or sign in to your account while the backend is running before placing a database order.');
-    error.status = 409;
-    throw error;
-  }
-  const useLocalDemoForPublicApi = !requiresSessionToken
-    && endpoint.startsWith('/api/')
-    && hasStickyLocalSession
-    && endpoint !== '/api/auth/signup';
-  const useLocalDemoForSession = requiresSessionToken && hasLocalDemoSessionToken(token, { admin });
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  if (useLocalDemoForSession || useLocalDemoForPublicApi) {
+  // If running directly as local offline file:// (without any server), use local demo backend
+  if (typeof window !== 'undefined' && window.location.protocol === 'file:') {
     return localApiRequest(endpoint, {
       method,
       body,
       auth,
       admin,
       token,
-      reason: useLocalDemoForSession
-        ? (admin ? 'sticky-local-admin-session' : 'sticky-local-user-session')
-        : 'sticky-local-session-context',
+      reason: 'file-protocol',
     });
   }
 
-  // Keep request routing consistent after fallback activates.
-  // When fallback is active, periodically probe live backend and recover automatically.
-  if (localDemoBackendActive) {
-    const restored = await tryRecoverLiveBackend();
-    if (!restored) {
-      if (requiresSessionToken) {
-        const error = new Error('Live backend is unreachable for this signed-in session. Please try again.');
-        error.status = 503;
-        throw error;
-      }
-      return localApiRequest(endpoint, {
-        method,
-        body,
-        auth,
-        admin,
-        token,
-        reason: 'sticky-local-demo',
-      });
-    }
-  }
+  const baseUrl = resolveApiBaseUrl();
+  const requestUrl = baseUrl ? new URL(endpoint, baseUrl).toString() : endpoint;
 
   let response;
-  const requestUrl = new URL(endpoint, API_BASE_URL).toString();
   try {
     response = await fetch(requestUrl, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
     });
-  } catch {
-    const reachable = await probeLiveBackend({ force: true });
-    if (reachable) {
-      const error = new Error('Backend request failed. Please try again.');
-      error.status = 503;
-      throw error;
-    }
-    if (requiresSessionToken) {
-      const error = new Error('Unable to reach the backend for your signed-in account. Please retry.');
-      error.status = 503;
-      throw error;
-    }
-    return localApiRequest(endpoint, {
-      method,
-      body,
-      auth,
-      admin,
-      token,
-      reason: 'network-error',
-    });
+  } catch (err) {
+    console.error('API connection error:', err);
+    const error = new Error('Could not connect to the GREENBASKET server. Please check your internet connection.');
+    error.status = 503;
+    throw error;
   }
 
   const contentType = response.headers.get('content-type') || '';
-  const payload = contentType.includes('application/json')
-    ? await response.json()
-    : { message: await response.text() };
+  let payload = {};
+  if (contentType.includes('application/json')) {
+    try {
+      payload = await response.json();
+    } catch {
+      payload = { message: 'Invalid server response' };
+    }
+  } else {
+    const text = await response.text();
+    payload = { message: text || `HTTP ${response.status}` };
+  }
 
   if (!response.ok) {
-    const isLikelyWrongServer = endpoint.startsWith('/api/')
-      && !contentType.includes('application/json')
-      && response.status === 404;
-    if (isLikelyWrongServer) {
-      const reachable = await probeLiveBackend({ force: true });
-      if (requiresSessionToken) {
-        const error = new Error('Connected backend is missing this signed-in API route. Please restart backend and sign in again.');
-        error.status = 503;
-        throw error;
-      }
-      return localApiRequest(endpoint, {
-        method,
-        body,
-        auth,
-        admin,
-        token,
-        reason: reachable ? 'api-route-unavailable' : 'api-not-found-on-origin',
-      });
-    }
-    const message = isLikelyWrongServer
-      ? 'GREENBASKET API was not found on this server. Start the backend with `npm start` and open http://localhost:3000.'
-      : payload.message || 'Request failed';
+    const message = payload.message || payload.error || `Request failed with status ${response.status}`;
     const error = new Error(message);
     error.status = response.status;
+    error.payload = payload;
     throw error;
   }
 
@@ -4793,6 +4718,16 @@ if (typeof window !== 'undefined') {
 
     if (window.location.protocol === 'file:') {
       toast('Run `npm start` and open http://127.0.0.1:3000 to use the real backend.', 'info');
+    } else {
+      localDemoBackendActive = false;
+      const userToken = getAuthToken();
+      if (userToken && hasLocalDemoSessionToken(userToken, { admin: false })) {
+        clearAuthSession();
+      }
+      const adminToken = getAdminToken();
+      if (adminToken && hasLocalDemoSessionToken(adminToken, { admin: true })) {
+        clearAdminSession();
+      }
     }
 
     await restoreUserSession();
