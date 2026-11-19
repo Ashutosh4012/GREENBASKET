@@ -47,7 +47,7 @@ The UI provides a grocery-first delivery experience:
 
 1. Open the project directory in your terminal:
    ```bash
-   cd Quick-Bite-Grocery
+   cd GREENBASKET
    ```
 2. Start the local server:
    ```bash
