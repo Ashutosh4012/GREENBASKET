@@ -2754,8 +2754,31 @@ async function handleGetLiveRestaurants(req, res, url) {
     const payload = await fetchLiveRestaurants(location);
     sendJson(res, 200, payload);
   } catch (error) {
-    console.error('Failed to load live restaurants:', error);
-    sendError(res, 502, 'Could not load live restaurants for that location right now');
+    console.warn('Falling back to catalog stores due to live restaurant lookup error:', error.message);
+    try {
+      const store = await readStore();
+      const catalogStores = sanitizeCatalogStores(store.catalogStores || []);
+      sendJson(res, 200, {
+        location,
+        restaurants: catalogStores.map(s => ({
+          id: s.id,
+          name: s.name,
+          cuisine: s.cuisine || s.category || 'Groceries & Essentials',
+          rating: s.rating || 4.5,
+          deliveryTime: s.deliveryTime || 20,
+          minOrder: s.minOrder || 149,
+          avgCost: s.avgCost || 400,
+          img: s.img,
+          address: s.address || location,
+          distanceKm: 1.5,
+        })),
+        source: 'GREENBASKET Catalog (Fallback)',
+        fetchedAt: Date.now(),
+      });
+    } catch (fallbackError) {
+      console.error('Failed to load fallback catalog stores:', fallbackError);
+      sendError(res, 502, 'Could not load live restaurants for that location right now');
+    }
   }
 }
 
